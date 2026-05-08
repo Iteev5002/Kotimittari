@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kotimittari v.30 Kojelauta</title>
+    <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f7f6; display: flex; flex-direction: column; align-items: center; margin: 0; padding: 20px; }
+        .container { width: 95%; max-width: 900px; }
+        .card { background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; text-align: center; }
+        h1 { color: #2c3e50; }
+        #timer_val { font-size: 64px; color: #e74c3c; font-weight: bold; margin: 10px 0; }
+        .stats-grid { display: flex; justify-content: space-around; margin-top: 15px; }
+        .stat-box { background: #ecf0f1; padding: 15px; border-radius: 8px; width: 40%; }
+        .stat-label { font-size: 14px; color: #7f8c8d; text-transform: uppercase; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #2980b9; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; background: white; }
+        th, td { border: 1px solid #eee; padding: 12px; text-align: left; }
+        th { background-color: #3498db; color: white; position: sticky; top: 0; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Kotimittari v.30 Kojelauta</h1>
+
+    <div class="card">
+        <div class="stat-label">AJASTIMEN TILA m:s </div>
+        <div id="timer_val">--:--</div>
+    </div>
+
+    <div class="card">
+        <div id="chart_div" style="width: 100%; height: 350px;"></div>
+    </div>
+
+    <div class="card">
+        <div class="stats-grid">
+            <div class="stat-box">
+                <div class="stat-label">Lämpötila</div>
+                <div class="stat-value"><span id="curr_temp">--</span> °C</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Ilmankosteus</div>
+                <div class="stat-value"><span id="curr_hum">--</span> %</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card" style="overflow-x: auto;">
+        <h3>Mittaushistoria (Viimeisimmät)</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Aika</th>
+                    <th>Lämpö (°C)</th>
+                    <th>Kosteus (%)</th>
+                </tr>
+            </thead>
+            <tbody id="data_table_body">
+                {% for rivi in taulukko %}
+                <tr>
+                    <td>{{ rivi[0] }}</td>
+                    <td>{{ rivi[1] }}</td>
+                    <td>{{ rivi[2] }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    google.charts.load('current', {'packages':['corechart']});
+    let chart;
+    let dataTable;
+    let viimeisinAika = "";
+
+    function initChart() {
+        dataTable = new google.visualization.DataTable();
+        dataTable.addColumn('string', 'Aika');
+        dataTable.addColumn('number', 'Lämpötila');
+        dataTable.addColumn('number', 'Kosteus');
+
+        {% for rivi in taulukko %}
+            dataTable.addRow(["{{ rivi[0][-8:] }}", {{ rivi[1] }}, {{ rivi[2] or 0 }}]);
+        {% endfor %}
+
+        const options = {
+            curveType: 'function',
+            legend: { position: 'bottom' },
+            hAxis: { slantedText: true },
+            vAxis: { gridlines: { count: 5 } },
+            chartArea: { width: '85%', height: '70%' }
+        };
+
+        chart = new google.visualization.LineChart(document.getElementById('chart_div'));
+        chart.draw(dataTable, options);
+    }
+
+    google.charts.setOnLoadCallback(initChart);
+
+    function paivitaTiedot() {
+        fetch('/paivita')
+            .then(response => response.json())
+            .then(data => {
+                // 1. Päivitä aina ajastin, jos se on mukana vastauksessa
+                if (data.ajastin !== undefined) {
+                    document.getElementById("timer_val").textContent = data.ajastin;
+                }
+
+                // 2. Päivitä muut tiedot vain, jos on tullut uusi mittaus (aika muuttunut)
+                if (data.aika && data.aika !== viimeisinAika) {
+                    viimeisinAika = data.aika;
+                    
+                    document.getElementById("curr_temp").textContent = data.temp;
+                    document.getElementById("curr_hum").textContent = data.hum;
+                    
+                    const tbody = document.getElementById("data_table_body");
+                    const row = tbody.insertRow(0);
+                    row.insertCell(0).textContent = data.aika;
+                    row.insertCell(1).textContent = data.temp;
+                    row.insertCell(2).textContent = data.hum;
+                    
+                    if (tbody.rows.length > 20) tbody.deleteRow(20);
+
+                    if (dataTable && chart) {
+                        const lyhytAika = data.aika.includes('T') ? data.aika.split('T')[1] : data.aika;
+                        dataTable.addRow([lyhytAika, data.temp, data.hum]);
+                        if (dataTable.getNumberOfRows() > 20) dataTable.removeRow(0);
+                        chart.draw(dataTable, { curveType: 'function', legend: 'bottom' });
+                    }
+                }
+            })
+            .catch(err => console.error("Haku epäonnistui:", err));
+    }
+
+    // Tarkistetaan uudet tiedot 3 sekunnin välein (vähän tiheämmin ajastimen takia)
+    setInterval(paivitaTiedot, 3000);
+</script>
+
+</body>
+</html>
